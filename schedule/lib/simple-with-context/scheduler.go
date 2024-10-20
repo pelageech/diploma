@@ -1,4 +1,4 @@
-package simple_time_effective
+package simple_with_context
 
 import (
 	"context"
