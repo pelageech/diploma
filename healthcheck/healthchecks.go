@@ -2,7 +2,6 @@ package healthcheck
 
 import (
 	"context"
-	"math/rand/v2"
 	"sync/atomic"
 	"time"
 
@@ -11,12 +10,18 @@ import (
 
 type Backend struct {
 	alive atomic.Bool
+	check func(ctx context.Context) error
 	inRow int32
 }
 
-func (b *Backend) Check(ctx context.Context) error {
-	time.Sleep(50*time.Millisecond + rand.N(450*time.Millisecond))
-	return nil
+func NewBackend(check func(ctx context.Context) error) Backend {
+	return Backend{
+		check: check,
+	}
+}
+
+func (b *Backend) InRow() int32 {
+	return atomic.LoadInt32(&b.inRow)
 }
 
 type Target struct {
@@ -48,7 +53,7 @@ func NewHealthcheck(targets []*Target, scheduler stand.BatchScheduler) *Healthch
 	scheduler.BatchAdd(func(yield func(*stand.Job) bool) {
 		for _, target := range targets {
 			job := stand.NewJob(
-				check(target.Backend.Check),
+				check(target.Backend.check),
 				target.Timeout,
 				target.Interval,
 			)
