@@ -2,6 +2,7 @@ package simple_time_effective
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"log"
 	"sync"
@@ -32,7 +33,7 @@ func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
 	}
 }
 
-func (s *Scheduler) Schedule(ctx context.Context) {
+func (s *Scheduler) Schedule(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	wg.Add(len(s.jobs))
 	//ch := make(chan *stand.Job, 1000000)
@@ -74,11 +75,15 @@ func (s *Scheduler) Schedule(ctx context.Context) {
 	wg.Wait()
 }
 
-func (s *Scheduler) Add(job *stand.Job) {
+func (s *Scheduler) Add(job *stand.Job) error {
+	if _, ok := s.jobs[job.ID()]; ok {
+		return fmt.Errorf("%s: %w", job.ID(), stand.ErrJobExists)
+	}
 	s.jobs[job.ID()] = job
+	return nil
 }
 
-func (s *Scheduler) Remove(id stand.JobID) {
+func (s *Scheduler) Remove(id stand.JobID) error {
 	//TODO implement me
 	panic("implement me")
 }
