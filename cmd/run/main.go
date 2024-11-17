@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"log/slog"
+	"math/rand/v2"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func main() {
@@ -31,6 +35,19 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			_, span := otel.GetTracerProvider().Tracer("").Start(ctx, "aboba")
+			tm := 10*time.Millisecond + rand.N(100*time.Millisecond)
+			time.Sleep(tm)
+			span.SetAttributes(attribute.String("time_dur", tm.String()))
+			span.End()
+		}
+	}()
 	<-ctx.Done()
 }

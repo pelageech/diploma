@@ -31,9 +31,20 @@ services:
     networks:
       otel:
         ipv4_address: 192.168.0.2
+    
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - '16686:16686'
+    networks:
+      otel:
+        ipv4_address: 192.168.0.6
 
   stand:
-    image: run-go:latest
+    image: run-go
+    build:
+      context: .
+      dockerfile: .Dockerfile
     networks:
       otel:
         ipv4_address: 192.168.0.5

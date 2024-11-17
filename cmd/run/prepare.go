@@ -9,10 +9,13 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 func closer(fns ...func(context.Context) error) func(context.Context) error {
@@ -25,15 +28,19 @@ func closer(fns ...func(context.Context) error) func(context.Context) error {
 }
 
 func prepare(ctx context.Context) (stop func(context.Context) error, err error) {
-	res := resource.NewWithAttributes(
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("runtime-instrumentation-example"),
-	)
+	))
+	if err != nil {
+		return nil, err
+	}
 
 	stop, err = grpcPrep(ctx, res)
 	if err != nil {
 		return nil, err
 	}
+
 	defer func() {
 		if err != nil {
 			stopErr := stop(context.Background())
@@ -42,6 +49,12 @@ func prepare(ctx context.Context) (stop func(context.Context) error, err error) 
 			}
 		}
 	}()
+
+	stopTrace, err := grpcTracePrep(ctx, res)
+	if err != nil {
+		return closer(stop, stopTrace), err
+	}
+	stop = closer(stop, stopTrace)
 
 	err = otelRuntimeMeter()
 	if err != nil {
@@ -78,7 +91,6 @@ func grpcPrep(ctx context.Context, res *resource.Resource) (func(context.Context
 	if err != nil {
 		return nil, err
 	}
-	slog.Default().Info("connected")
 	stop := exp.Shutdown
 
 	read := metric.NewPeriodicReader(exp, metric.WithInterval(1*time.Second))
@@ -91,6 +103,33 @@ func grpcPrep(ctx context.Context, res *resource.Resource) (func(context.Context
 	return stop, nil
 }
 
+func grpcTracePrep(ctx context.Context, res *resource.Resource) (func(context.Context) error, error) {
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithInsecure(), otlptracegrpc.WithTimeout(10*time.Second), otlptracegrpc.WithRetry(otlptracegrpc.RetryConfig{
+		Enabled:         true,
+		InitialInterval: 500 * time.Millisecond,
+		MaxInterval:     5 * time.Second,
+		MaxElapsedTime:  10 * time.Second,
+	}), otlptracegrpc.WithEndpoint("192.168.0.3:4317"))
+	if err != nil {
+		return nil, err
+	}
+	stop := exp.Shutdown
+
+	otel.SetTextMapPropagator(newPropagator())
+	provider := trace.NewTracerProvider(trace.WithResource(res), trace.WithBatcher(exp))
+	stop = closer(stop, provider.Shutdown)
+	otel.SetTracerProvider(provider)
+
+	return stop, err
+}
+
 func otelRuntimeMeter() error {
 	return runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
+}
+
+func newPropagator() propagation.TextMapPropagator {
+	return propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
 }

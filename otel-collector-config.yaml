@@ -13,6 +13,10 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:8889
     namespace: metrics
+  otlp:
+    endpoint: 192.168.0.6:4317
+    tls:
+      insecure: true
 
 extensions:
   health_check:
@@ -26,3 +30,6 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      exporters: [otlp]
