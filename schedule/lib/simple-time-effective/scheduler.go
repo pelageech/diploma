@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -42,7 +43,9 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 		jobCh := make(chan *stand.Job)
 		go func() {
 			defer wg.Done()
-
+			defer func() {
+				close(jobCh)
+			}()
 			timer := time.NewTimer(job.Timeout())
 			defer timer.Stop()
 
@@ -53,6 +56,8 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 			for {
 				timer.Reset(job.Timeout())
 				select {
+				case <-ctx.Done():
+					return
 				case <-done:
 				case <-timer.C:
 					log.Println("job timeout:", job.ID())
@@ -60,19 +65,34 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 				if !timer.Stop() {
 					<-timer.C
 				}
-				<-ticker.C
-				jobCh <- job
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					jobCh <- job
+				}
 			}
 		}()
 		go func() {
-			for job := range jobCh {
-				job.Run(ctx)
-				done <- struct{}{}
+			for {
+				select {
+				case <-ctx.Done():
+					close(done)
+					return
+				case job := <-jobCh:
+					err := job.Run(ctx)
+					if err != nil {
+						slog.Error("job err", "id", job.ID(), "err", err)
+					}
+					done <- struct{}{}
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
+	return nil
 }
 
 func (s *Scheduler) Add(job *stand.Job) error {

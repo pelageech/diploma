@@ -2,6 +2,7 @@ package healthcheck
 
 import (
 	"context"
+	"go.opentelemetry.io/otel"
 	"sync/atomic"
 	"time"
 
@@ -50,12 +51,15 @@ func NewHealthcheck(targets []*Target, scheduler stand.BatchScheduler) *Healthch
 		targets:   targets,
 		scheduler: scheduler,
 	}
+	hist, _ := otel.GetMeterProvider().Meter("main").Int64Histogram("job_timings")
 	scheduler.BatchAdd(func(yield func(*stand.Job) bool) {
 		for _, target := range targets {
 			job := stand.NewJob(
 				check(target.Backend.check),
 				target.Timeout,
 				target.Interval,
+				stand.WithOtelTracer(otel.GetTracerProvider().Tracer("main")),
+				stand.WithOtelTimingHist(hist),
 			)
 			if !yield(job) {
 				return

@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	noop2 "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"iter"
 	"time"
 
@@ -25,6 +30,8 @@ type Job struct {
 	interval time.Duration
 	id       JobID
 	task     Runnable
+	tracer   trace.Tracer
+	hist     metric.Int64Histogram
 }
 
 func (j *Job) ID() JobID {
@@ -32,7 +39,26 @@ func (j *Job) ID() JobID {
 }
 
 func (j *Job) Run(ctx context.Context) error {
-	return j.task.Run(ctx)
+	ctx, span := j.tracer.Start(ctx, "Job.Run")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("job.id", j.id.String()),
+		attribute.String("job.timeout", j.timeout.String()),
+		attribute.String("job.interval", j.interval.String()),
+	)
+
+	t := time.Now()
+	err := j.task.Run(ctx)
+	span.RecordError(err)
+
+	f := time.Since(t).Milliseconds()
+	if err != nil {
+		j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "ERR")))
+		return err
+	}
+	j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "OK")))
+	return nil
 }
 
 func (j *Job) Timeout() time.Duration {
@@ -52,13 +78,35 @@ func (j *Job) Clone() *Job {
 	}
 }
 
-func NewJob(task Runnable, timeout, interval time.Duration) *Job {
-	return &Job{
+type JobOpt func(*Job)
+
+func WithOtelTracer(tracer trace.Tracer) JobOpt {
+	return func(j *Job) {
+		j.tracer = tracer
+	}
+}
+
+func WithOtelTimingHist(hist metric.Int64Histogram) JobOpt {
+	return func(j *Job) {
+		j.hist = hist
+	}
+}
+
+func NewJob(task Runnable, timeout, interval time.Duration, opts ...JobOpt) *Job {
+	j := &Job{
 		timeout:  timeout,
 		interval: interval,
 		id:       generateID(),
 		task:     task,
+		tracer:   noop.Tracer{},
+		hist:     noop2.Int64Histogram{},
 	}
+
+	for _, opt := range opts {
+		opt(j)
+	}
+
+	return j
 }
 
 var (
