@@ -1,4 +1,4 @@
-package simple_time_effective
+package workerpool
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/panjf2000/ants/v2"
 	"github.com/pelageech/diploma/stand"
 	"go.opentelemetry.io/otel"
 )
@@ -43,9 +44,12 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 	tasksComplete, _ := meter.Int64Counter("tasks_complete")
 	taskCompletion, _ := meter.Int64Histogram("task_full_path")
 
+	pool, _ := ants.NewPool(1500, ants.WithPreAlloc(true), ants.WithMaxBlockingTasks(0))
+	defer pool.Release()
+
 	wg := sync.WaitGroup{}
 	wg.Add(len(s.jobs))
-	jobCh := make(chan *stand.Job, 5000000)
+	jobCh := make(chan *stand.Job, 500000)
 	m := map[stand.JobID]chan struct{}{}
 	for _, job := range s.jobs {
 
@@ -89,19 +93,20 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 			}
 		}(job)
 	}
-	for range 1000 {
+
+	for range 1 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
+			for job := range jobCh {
+				job := job
 				t := time.Now()
-				select {
-				case <-ctx.Done():
-					for job := range jobCh {
-						close(m[job.ID()])
+				_ = pool.Submit(func() {
+					select {
+					case <-ctx.Done():
+						return
+					default:
 					}
-					return
-				case job := <-jobCh:
 					tasksWaiting.Add(ctx, -1)
 					err := job.Run(ctx)
 					if err != nil {
@@ -109,8 +114,8 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 					}
 					m[job.ID()] <- struct{}{}
 					tasksComplete.Add(ctx, 1)
-				}
-				taskCompletion.Record(ctx, int64(time.Since(t).Milliseconds()))
+					taskCompletion.Record(ctx, int64(time.Since(t).Milliseconds()))
+				})
 			}
 		}()
 	}

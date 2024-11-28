@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -55,11 +54,6 @@ func prepare(ctx context.Context) (stop func(context.Context) error, err error) 
 		return closer(stop, stopTrace), err
 	}
 	stop = closer(stop, stopTrace)
-
-	//err = otelRuntimeMeter()
-	//if err != nil {
-	//	return stop, err
-	//}
 
 	return stop, nil
 }
@@ -121,10 +115,6 @@ func grpcTracePrep(ctx context.Context, res *resource.Resource) (func(context.Co
 	otel.SetTracerProvider(provider)
 
 	return stop, err
-}
-
-func otelRuntimeMeter() error {
-	return runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
 }
 
 func newPropagator() propagation.TextMapPropagator {

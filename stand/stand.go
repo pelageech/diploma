@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
+	"time"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	noop2 "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
-	"iter"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -39,20 +40,10 @@ func (j *Job) ID() JobID {
 }
 
 func (j *Job) Run(ctx context.Context) error {
-	ctx, span := j.tracer.Start(ctx, "Job.Run")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("job.id", j.id.String()),
-		attribute.String("job.timeout", j.timeout.String()),
-		attribute.String("job.interval", j.interval.String()),
-	)
-
 	t := time.Now()
 	err := j.task.Run(ctx)
-	span.RecordError(err)
-
 	f := time.Since(t).Milliseconds()
+
 	if err != nil {
 		j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "ERR")))
 		return err

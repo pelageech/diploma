@@ -3,6 +3,23 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
+  hostmetrics:
+    collection_interval: 2s
+    scrapers:
+      # CPU utilization metrics
+      cpu:
+      # Disk I/O metrics
+      disk:
+      # File System utilization metrics
+      filesystem:
+      # CPU load metrics
+      load:
+      # Memory utilization metrics
+      memory:
+      # Network interface I/O metrics & TCP connection metrics
+      network:
+      # Paging/Swap space utilization and I/O metrics
+      paging:
 
 processors:
   batch:
@@ -27,7 +44,7 @@ service:
   extensions: [health_check, pprof, zpages]
   pipelines:
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, hostmetrics]
       processors: [batch]
       exporters: [prometheus]
     traces:

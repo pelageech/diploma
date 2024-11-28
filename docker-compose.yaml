@@ -49,6 +49,8 @@ services:
     networks:
       otel:
         ipv4_address: 192.168.0.5
+    environment:
+      - N_TASKS_REPEAT=1000
 
   grafana:
     image: grafana/grafana:latest
