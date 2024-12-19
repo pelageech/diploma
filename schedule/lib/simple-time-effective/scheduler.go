@@ -36,12 +36,12 @@ func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
 
 func (s *Scheduler) Schedule(ctx context.Context) error {
 	// tracer := otel.GetTracerProvider().Tracer("ste-scheduler")
-	meter := otel.GetMeterProvider().Meter("ste-scheduler")
+	meter := otel.GetMeterProvider().Meter("scheduler")
 
 	tasksWaiting, _ := meter.Int64UpDownCounter("tasks_waiting")
-	tasksTimeout, _ := meter.Int64Counter("tasks_timeout")
-	tasksComplete, _ := meter.Int64Counter("tasks_complete")
-	taskCompletion, _ := meter.Int64Histogram("task_full_path")
+	//tasksTimeout, _ := meter.Int64Counter("tasks_timeout")
+	taskFullPath, _ := meter.Int64Histogram("task_full_path")
+	jobsCount, _ := meter.Int64UpDownCounter("jobs_count")
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(s.jobs))
@@ -53,6 +53,8 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 		m[job.ID()] = make(chan struct{}, 1)
 		//jobCh := make(chan *stand.Job)
 		go func(job *stand.Job) {
+			defer jobsCount.Add(context.Background(), -1)
+			jobsCount.Add(context.Background(), 1)
 			defer wg.Done()
 			//defer func() {
 			//	close(jobCh)
@@ -71,25 +73,23 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				case <-m[job.ID()]:
-				case <-timer.C:
-					tasksTimeout.Add(ctx, 1)
+					//case <-timer.C:
+					//	tasksTimeout.Add(ctx, 1)
 				}
-				if !timer.Stop() {
-					<-timer.C
-				}
+				//timer.Stop()
 
 				select {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					timer.Reset(job.Timeout())
+					//timer.Reset(job.Timeout())
 					jobCh <- job
 					tasksWaiting.Add(ctx, 1)
 				}
 			}
 		}(job)
 	}
-	for range 1000 {
+	for range 450 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -108,9 +108,8 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 						slog.Error("job err", "id", job.ID(), "err", err)
 					}
 					m[job.ID()] <- struct{}{}
-					tasksComplete.Add(ctx, 1)
 				}
-				taskCompletion.Record(ctx, int64(time.Since(t).Milliseconds()))
+				taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
 			}
 		}()
 	}

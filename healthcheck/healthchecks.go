@@ -2,7 +2,9 @@ package healthcheck
 
 import (
 	"context"
+	"github.com/panjf2000/ants/v2"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"sync/atomic"
 	"time"
 
@@ -40,10 +42,34 @@ func (h *Healthcheck) Start(ctx context.Context) {
 	h.scheduler.Schedule(ctx)
 }
 
-type check func(context.Context) error
+var pool, _ = ants.NewPool(ants.DefaultAntsPoolSize)
+
+type check struct {
+	f               func(context.Context) error
+	stillProcessing metric.Int64UpDownCounter
+	tasksTimeout    metric.Int64Counter
+}
 
 func (c check) Run(ctx context.Context) error {
-	return c(ctx)
+	return c.f(ctx)
+}
+
+func (c check) Exec(_ time.Time) {
+	//err := c(context.Background())
+	//if err != nil {
+	//	panic(err)
+	//}
+	go func() {
+		ctx, cancel := context.WithTimeoutCause(context.Background(), time.Second, stand.ErrJobTimeout)
+		defer cancel()
+
+		c.stillProcessing.Add(ctx, 1)
+		err := c.f(ctx)
+		c.stillProcessing.Add(ctx, -1)
+		if err != nil {
+			c.tasksTimeout.Add(ctx, 1)
+		}
+	}()
 }
 
 func NewHealthcheck(targets []*Target, scheduler stand.BatchScheduler) *Healthcheck {
@@ -51,14 +77,19 @@ func NewHealthcheck(targets []*Target, scheduler stand.BatchScheduler) *Healthch
 		targets:   targets,
 		scheduler: scheduler,
 	}
-	hist, _ := otel.GetMeterProvider().Meter("main").Int64Histogram("job_timings")
+	hist, _ := otel.Meter("main").Int64Histogram("job_timings")
+	stillProcessing, _ := otel.Meter("scheduler").Int64UpDownCounter("still_processing")
+	tasksTimeout, _ := otel.Meter("scheduler").Int64Counter("tasks_timeout")
 	scheduler.BatchAdd(func(yield func(*stand.Job) bool) {
 		for _, target := range targets {
 			job := stand.NewJob(
-				check(target.Backend.check),
+				check{
+					f:               target.Backend.check,
+					stillProcessing: stillProcessing,
+					tasksTimeout:    tasksTimeout,
+				},
 				target.Timeout,
 				target.Interval,
-				stand.WithOtelTracer(otel.GetTracerProvider().Tracer("main")),
 				stand.WithOtelTimingHist(hist),
 			)
 			if !yield(job) {

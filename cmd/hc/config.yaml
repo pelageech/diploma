@@ -1,0 +1,20 @@
+version: v1
+scheduler:
+  name: ste
+  targets:
+    - sleep: 500ms
+      interval: 2s
+      timeout: 1s
+      count: 1000
+    - sleep: 500ms
+      interval: 4s
+      timeout: 1s
+      count: 1000
+    - sleep: 500ms
+      interval: 6s
+      timeout: 1s
+      count: 1000
+    - sleep: 500ms
+      interval: 8s
+      timeout: 1s
+      count: 1000

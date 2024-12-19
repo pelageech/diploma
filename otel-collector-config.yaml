@@ -36,12 +36,11 @@ exporters:
       insecure: true
 
 extensions:
-  health_check:
   pprof:
-  zpages:
+    endpoint: "0.0.0.0:1777"
 
 service:
-  extensions: [health_check, pprof, zpages]
+  extensions: [pprof]
   pipelines:
     metrics:
       receivers: [otlp, hostmetrics]

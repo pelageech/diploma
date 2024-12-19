@@ -4,7 +4,7 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
     ports:
-      - '1888:1888' # pprof extension
+      - '1777:1777' # pprof extension
       - '8888:8888' # Prometheus metrics exposed by the Collector
       - '8889:8889' # Prometheus exporter metrics
       - '13133:13133' # health_check extension
@@ -31,7 +31,7 @@ services:
     networks:
       otel:
         ipv4_address: 192.168.0.2
-    
+
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
@@ -45,19 +45,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./run-go"]
+    command: ["./run-go", "-config", "/app/stand/config.yaml"]
+    configs:
+      - source: stand_config
+        target: /app/stand/config.yaml
     networks:
       otel:
         ipv4_address: 192.168.0.5
-    environment:
-      - N_TASKS_REPEAT=1000
+
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
     restart: unless-stopped
+    user: root
+    container_name: grafana
+    hostname: grafana
     ports:
      - '3000:3000'
+    volumes:
+      - ./grafana:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
     networks:
       otel:
         ipv4_address: 192.168.0.4
@@ -68,3 +75,27 @@ networks:
     ipam:
      config:
        - subnet: 192.168.0.0/16
+
+configs:
+  stand_config:
+    content: |
+      version: v1
+      scheduler:
+        type: ste
+        targets:
+          - sleep: 200ms
+            interval: 2s
+            timeout: 1s
+            count: 5000
+          - sleep: 200ms
+            interval: 4s
+            timeout: 1s
+            count: 5000
+          - sleep: 200ms
+            interval: 8s
+            timeout: 1s
+            count: 5000
+          - sleep: 200ms
+            interval: 16s
+            timeout: 1s
+            count: 3000

@@ -2,29 +2,54 @@ package main
 
 import (
 	"context"
+	_ "embed"
+	"flag"
 	"fmt"
+	"github.com/pelageech/diploma/schedule/config"
+	"github.com/pelageech/diploma/stand"
+	"log"
 	"log/slog"
 	"math/rand/v2"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"slices"
-	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/pelageech/diploma/healthcheck"
-	workerpool "github.com/pelageech/diploma/schedule/worker-pool"
 )
 
+var configPath = flag.String("config", "./cmd/hc/config.yaml", "path to config file")
+
 func main() {
+
+	flag.Parse()
+
+	configFile, err := os.Open(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer configFile.Close()
+
+	cfg, err := config.Export(configFile)
+	if err != nil {
+		slog.Error("failed to export config", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("cfg", "cfg", cfg)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	shutdown, err := prepare(ctx)
 	if err != nil {
 		slog.Error("error preparing shutdown:", "err", err)
-		return
+		os.Exit(1)
 	}
 	defer func() {
 		err := shutdown(context.Background())
@@ -34,65 +59,50 @@ func main() {
 	}()
 
 	var ii [3]int32
-	targets := []*healthcheck.Target{
-		{
-			Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-				t := rand.N(time.Second / 2)
-				time.Sleep(t)
-				atomic.AddInt32(&ii[0], 1)
-				return ctx.Err()
-			}),
-			Timeout:  time.Second,
-			Interval: 1 * time.Second,
-		},
-		{
-			Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-				t := rand.N(time.Second / 2)
-				time.Sleep(t)
-				atomic.AddInt32(&ii[0], 1)
-				return ctx.Err()
-			}),
-			Timeout:  time.Second,
-			Interval: 4 * time.Second,
-		},
-		{
-			Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-				t := rand.N(time.Second / 2)
-				time.Sleep(t)
-				atomic.AddInt32(&ii[0], 1)
-				return ctx.Err()
-			}),
-			Timeout:  time.Second,
-			Interval: 8 * time.Second,
-		},
-		{
-			Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-				t := rand.N(time.Second / 2)
-				time.Sleep(t)
-				atomic.AddInt32(&ii[0], 1)
-				return ctx.Err()
-			}),
-			Timeout:  time.Second,
-			Interval: 16 * time.Second,
-		},
-		{
-			Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-				t := rand.N(time.Second / 2)
-				time.Sleep(t)
-				atomic.AddInt32(&ii[0], 1)
-				return ctx.Err()
-			}),
-			Timeout:  time.Second,
-			Interval: 32 * time.Second,
-		},
+
+	var (
+		targets   []*healthcheck.Target
+		scheduler stand.Scheduler
+	)
+	if cfg.Version == "v1" {
+		scheduler, err = config.ToScheduler(cfg.Scheduler.Type, []*stand.Job(nil))
+		if err != nil {
+			slog.Error("failed to convert scheduler config", "err", err)
+			os.Exit(1)
+		}
+
+		for _, targetCfg := range cfg.Scheduler.Targets {
+			targets = append(targets, slices.Repeat([]*healthcheck.Target{{
+				Backend: healthcheck.NewBackend(func(ctx context.Context) error {
+					ctxTime, cancel := context.WithTimeout(ctx, rand.N(targetCfg.Sleep))
+					defer cancel()
+					i := 0
+				loop:
+					for {
+						select {
+						case <-ctxTime.Done():
+							break loop
+						case <-time.After(time.Millisecond / 8):
+						}
+						if i%100 == 0 {
+							runtime.Gosched()
+						}
+						i++
+					}
+
+					atomic.AddInt32(&ii[0], 1)
+					return context.Cause(ctx)
+				}),
+				Timeout:  targetCfg.Timeout,
+				Interval: targetCfg.Interval,
+			}}, targetCfg.Count)...)
+		}
+	} else {
+		slog.Info("scheduler version unsupported", "version", cfg.Version)
+		os.Exit(1)
 	}
-	ntasks := 5000
-	tasks := os.Getenv("N_TASKS_REPEAT")
-	_ntasks, err := strconv.Atoi(tasks)
-	if err == nil {
-		ntasks = _ntasks
-	}
-	h := healthcheck.NewHealthcheck(slices.Repeat(targets, ntasks), workerpool.NewScheduler(nil))
+
+	h := healthcheck.NewHealthcheck(targets, scheduler.(stand.BatchScheduler))
 
 	go func() {
 		t := time.NewTicker(time.Second)
@@ -106,12 +116,24 @@ func main() {
 		}
 	}()
 
-	done := make(chan struct{}, 1)
+	done := make(chan struct{}, 2)
 	go func() {
 		h.Start(ctx)
 		done <- struct{}{}
 		slog.Info("scheduler is shut down")
 	}()
 
+	s := http.Server{
+		Addr: "localhost:8080",
+	}
+	go func() {
+		l, _ := net.Listen("tcp", ":8080")
+		if err := s.Serve(l); err != http.ErrServerClosed {
+			return
+		}
+	}()
+
 	<-done
+	<-ctx.Done()
+	_ = s.Shutdown(ctx)
 }

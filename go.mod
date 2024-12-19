@@ -15,6 +15,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.32.0
 	go.opentelemetry.io/otel/sdk/metric v1.32.0
 	go.opentelemetry.io/otel/trace v1.32.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

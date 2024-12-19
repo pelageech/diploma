@@ -1,4 +1,4 @@
-package simple_with_context
+package swe
 
 import (
 	"context"
