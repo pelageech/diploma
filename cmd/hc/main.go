@@ -15,7 +15,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"runtime"
 	"slices"
 	"sync/atomic"
 	"syscall"
@@ -70,22 +69,23 @@ func main() {
 			slog.Error("failed to convert scheduler config", "err", err)
 			os.Exit(1)
 		}
-
 		for _, targetCfg := range cfg.Scheduler.Targets {
 			targets = append(targets, slices.Repeat([]*healthcheck.Target{{
 				Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-					ctxTime, cancel := context.WithTimeout(ctx, rand.N(targetCfg.Sleep))
-					defer cancel()
+
+					//ctxTime, cancel := context.WithTimeout(ctx, rand.N(targetCfg.Sleep))
+					//defer cancel()
+					tm := time.NewTimer(rand.N(targetCfg.Sleep))
+					defer tm.Stop()
+					t := time.NewTicker(time.Millisecond / 8)
+					defer t.Stop()
 					i := 0
 				loop:
 					for {
 						select {
-						case <-ctxTime.Done():
+						case <-tm.C:
 							break loop
-						case <-time.After(time.Millisecond / 8):
-						}
-						if i%100 == 0 {
-							runtime.Gosched()
+						case <-t.C:
 						}
 						i++
 					}

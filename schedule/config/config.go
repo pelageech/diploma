@@ -7,6 +7,7 @@ import (
 	igc "github.com/pelageech/diploma/schedule/lib/ingoroutine-cancellabe"
 	ste "github.com/pelageech/diploma/schedule/lib/simple-time-effective"
 	swe "github.com/pelageech/diploma/schedule/lib/simple-with-context"
+	workerpool "github.com/pelageech/diploma/schedule/worker-pool"
 	"github.com/pelageech/diploma/stand"
 	"gopkg.in/yaml.v3"
 	"io"
@@ -27,6 +28,7 @@ const (
 	SimpleWithContext
 	InGoroutine
 	InGoroutineCancellable
+	WorkerPool
 )
 
 func (s *SchedulerType) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -47,6 +49,8 @@ func (s *SchedulerType) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		*s = InGoroutine
 	case "in-go-ctx":
 		*s = InGoroutineCancellable
+	case "worker-pool":
+		*s = WorkerPool
 	}
 	return nil
 }
@@ -101,6 +105,15 @@ func ToScheduler(t SchedulerType, params ...any) (stand.Scheduler, error) {
 			return nil, errors.New("invalid parameter")
 		}
 		return igc.NewScheduler(jobs), nil
+	case WorkerPool:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return workerpool.NewScheduler(jobs), nil
 	}
 	return nil, errors.New("unknown SchedulerType")
 }

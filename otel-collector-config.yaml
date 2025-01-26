@@ -1,8 +1,14 @@
 receivers:
   otlp:
     protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
+      #grpc:
+      #  endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  jaeger:
+    protocols:
+      thrift_http:
+        endpoint: 0.0.0.0:14268
   hostmetrics:
     collection_interval: 2s
     scrapers:
@@ -26,7 +32,7 @@ processors:
 
 exporters:
   debug:
-    verbosity: detailed
+  #  verbosity: detailed
   prometheus:
     endpoint: 0.0.0.0:8889
     namespace: metrics
@@ -47,5 +53,6 @@ service:
       processors: [batch]
       exporters: [prometheus]
     traces:
-      receivers: [otlp]
-      exporters: [otlp]
+      receivers: [otlp, jaeger]
+      processors: [batch]
+      exporters: [debug]

@@ -80,6 +80,12 @@ func WithJobRunCount(count int64, block bool) JobRunOpt {
 	return func(j *runConfig) {}
 }
 
+var (
+	_attributeTimeout = metric.WithAttributes(attribute.String("status", "TIMEOUT"))
+	_attributeErr     = metric.WithAttributes(attribute.String("status", "ERR"))
+	_attributeOK      = metric.WithAttributes(attribute.String("status", "OK"))
+)
+
 func (j *Job) Run(ctx context.Context, opts ...JobRunOpt) error {
 	c := &runConfig{}
 	for _, opt := range opts {
@@ -114,15 +120,15 @@ func (j *Job) Run(ctx context.Context, opts ...JobRunOpt) error {
 
 	if err != nil {
 		if errors.Is(err, ErrJobTimeout) {
-			j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "TIMEOUT")))
+			j.hist.Record(ctx, f, _attributeTimeout)
 			return err
 		}
 
-		j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "ERR")))
+		j.hist.Record(ctx, f, _attributeErr)
 		return err
 	}
 	j.tasksComplete.Add(ctx, 1)
-	j.hist.Record(ctx, f, metric.WithAttributes(attribute.String("status", "OK")))
+	j.hist.Record(ctx, f, _attributeOK)
 
 	return nil
 }
