@@ -13,15 +13,62 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"net/url"
 	"os"
 	"os/signal"
-	"slices"
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unsafe"
 
+	"github.com/outcaste-io/ristretto/z"
 	"github.com/pelageech/diploma/healthcheck"
 )
+
+func alloc[T any](z *z.Allocator) *T {
+	var t T
+	return (*T)(unsafe.Pointer(&z.Allocate(int(unsafe.Sizeof(t)))[0]))
+}
+
+type task struct {
+	t   *time.Ticker
+	tt  *time.Timer
+	ii  [1]*int32
+	cfg time.Duration
+}
+
+func (t *task) Run(ctx context.Context) error {
+	if t.t == nil {
+		t.t = time.NewTicker(time.Millisecond / 8)
+	} else {
+		t.t.Reset(time.Millisecond / 8)
+	}
+	if t.tt == nil {
+		t.tt = time.NewTimer(rand.N(t.cfg))
+	} else {
+		t.tt.Reset(rand.N(t.cfg))
+	}
+	i := 0
+loop:
+	for range t.t.C {
+		select {
+		case <-t.tt.C:
+			break loop
+		default:
+		}
+		i++
+	}
+
+	//if t.tt == nil {
+	//	t.tt = time.NewTimer(rand.N(t.cfg))
+	//} else {
+	//	t.tt.Reset(rand.N(t.cfg))
+	//}
+	//<-t.tt.C
+
+	atomic.AddInt32(t.ii[0], 1)
+	return nil
+}
 
 var configPath = flag.String("config", "./cmd/hc/config.yaml", "path to config file")
 
@@ -57,7 +104,8 @@ func main() {
 		}
 	}()
 
-	var ii [3]int32
+	var a int32 = 0
+	var ii = [1]*int32{&a}
 
 	var (
 		targets   []*healthcheck.Target
@@ -70,32 +118,25 @@ func main() {
 			os.Exit(1)
 		}
 		for _, targetCfg := range cfg.Scheduler.Targets {
-			targets = append(targets, slices.Repeat([]*healthcheck.Target{{
-				Backend: healthcheck.NewBackend(func(ctx context.Context) error {
-
-					//ctxTime, cancel := context.WithTimeout(ctx, rand.N(targetCfg.Sleep))
-					//defer cancel()
-					tm := time.NewTimer(rand.N(targetCfg.Sleep))
-					defer tm.Stop()
-					t := time.NewTicker(time.Millisecond / 8)
-					defer t.Stop()
-					i := 0
-				loop:
-					for {
-						select {
-						case <-tm.C:
-							break loop
-						case <-t.C:
-						}
-						i++
-					}
-
-					atomic.AddInt32(&ii[0], 1)
-					return context.Cause(ctx)
-				}),
-				Timeout:  targetCfg.Timeout,
-				Interval: targetCfg.Interval,
-			}}, targetCfg.Count)...)
+			for range targetCfg.Count {
+				u, err := url.Parse("127.0.0.1:8080/abcd?dur=" + (20*time.Millisecond + rand.N(targetCfg.Sleep)).String())
+				if err != nil {
+					panic(err)
+				}
+				//t := healthcheck.NewTCPCheck("127.0.0.1:8080")
+				t := &healthcheck.HTTPCheck{
+					Url:    u,
+					Client: http.DefaultClient,
+				}
+				t.OnDone = func() {
+					atomic.AddInt32(ii[0], 1)
+				}
+				targets = append(targets, &healthcheck.Target{
+					Backend:  healthcheck.NewBackend(t),
+					Timeout:  targetCfg.Timeout,
+					Interval: targetCfg.Interval,
+				})
+			}
 		}
 	} else {
 		slog.Info("scheduler version unsupported", "version", cfg.Version)
@@ -111,7 +152,7 @@ func main() {
 			select {
 			case <-ctx.Done():
 			case <-t.C:
-				fmt.Println(atomic.LoadInt32(&ii[0]))
+				fmt.Println(atomic.LoadInt32(ii[0]))
 			}
 		}
 	}()

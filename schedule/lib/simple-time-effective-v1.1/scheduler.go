@@ -44,8 +44,20 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 	jobsCount, _ := meter.Int64UpDownCounter("jobs_count")
 
 	wg := sync.WaitGroup{}
+	jobCh := make(chan *stand.Job, 50000)
+	closed := false
+	mu := &sync.RWMutex{}
+	go func() {
+		select {
+		case <-ctx.Done():
+		}
+		mu.Lock()
+		defer mu.Unlock()
+
+		closed = true
+		close(jobCh)
+	}()
 	wg.Add(len(s.jobs))
-	jobCh := make(chan *stand.Job, 5000000)
 	m := map[stand.JobID]chan struct{}{}
 	for _, job := range s.jobs {
 
@@ -66,49 +78,53 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 			timer := time.NewTimer(job.Timeout())
 			defer timer.Stop()
 
+			mu.RLock()
+			if closed {
+				mu.RUnlock()
+				return
+			}
 			jobCh <- job
+			mu.RUnlock()
 			tasksWaiting.Add(ctx, 1)
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case <-m[job.ID()]:
-					//case <-timer.C:
-					//	tasksTimeout.Add(ctx, 1)
+				default:
 				}
-				//timer.Stop()
-
-				select {
-				case <-ctx.Done():
+				<-m[job.ID()]
+				<-ticker.C
+				mu.RLock()
+				if closed {
+					mu.RUnlock()
 					return
-				case <-ticker.C:
-					//timer.Reset(job.Timeout())
-					jobCh <- job
-					tasksWaiting.Add(ctx, 1)
 				}
+				jobCh <- job
+				mu.RUnlock()
+				tasksWaiting.Add(ctx, 1)
 			}
 		}(job)
 	}
-	for range 450 {
+	for range 460 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				t := time.Now()
+			for job := range jobCh {
 				select {
 				case <-ctx.Done():
 					for job := range jobCh {
 						close(m[job.ID()])
 					}
 					return
-				case job := <-jobCh:
-					tasksWaiting.Add(ctx, -1)
-					err := job.Run(ctx)
-					if err != nil {
-						slog.Error("job err", "id", job.ID(), "err", err)
-					}
-					m[job.ID()] <- struct{}{}
+				default:
 				}
+				t := time.Now()
+				tasksWaiting.Add(ctx, -1)
+				err := job.Run(ctx)
+				if err != nil {
+					slog.Error("job err", "id", job.ID(), "err", err)
+				}
+				m[job.ID()] <- struct{}{}
 				taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
 			}
 		}()

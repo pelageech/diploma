@@ -2,60 +2,21 @@ package ingoroutine
 
 import (
 	"context"
-	"fmt"
+	"github.com/pelageech/diploma/schedule/lib/base"
 	"github.com/pelageech/diploma/stand"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"iter"
 	"sync"
 	"time"
 )
 
 type Scheduler struct {
-	jobs map[stand.JobID]*stand.Job
+	*base.Scheduler
 }
 
 func NewScheduler(jobs []*stand.Job) *Scheduler {
-	m := make(map[stand.JobID]*stand.Job, len(jobs))
-	for _, j := range jobs {
-		m[j.ID()] = j
-	}
-	return &Scheduler{jobs: m}
-}
-
-func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
-	return func(yield func(stand.JobID, *stand.Job) bool) {
-		for k, v := range s.jobs {
-			if !yield(k, v) {
-				return
-			}
-		}
-	}
-}
-
-func (s *Scheduler) Add(job *stand.Job) error {
-	if _, ok := s.jobs[job.ID()]; ok {
-		return fmt.Errorf("%s: %w", job.ID(), stand.ErrJobExists)
-	}
-	s.jobs[job.ID()] = job
-	return nil
-}
-
-func (s *Scheduler) Remove(id stand.JobID) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *Scheduler) BatchAdd(jobs iter.Seq[*stand.Job]) {
-	for job := range jobs {
-		s.Add(job)
-	}
-}
-
-func (s *Scheduler) BatchRemove(i iter.Seq[*stand.Job]) {
-	//TODO implement me
-	panic("implement me")
+	return &Scheduler{Scheduler: base.NewScheduler(jobs)}
 }
 
 func (s *Scheduler) Schedule(ctx context.Context) error {
@@ -67,8 +28,8 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 	stillProcessing, _ := meter.Int64UpDownCounter("still_processing")
 
 	wg := sync.WaitGroup{}
-	wg.Add(len(s.jobs))
-	for _, job := range s.jobs {
+	wg.Add(len(s.JobsMap()))
+	for _, job := range s.Jobs() {
 		go func(ctx context.Context, job *stand.Job) {
 			defer jobsCount.Add(ctx, -1)
 			jobsCount.Add(ctx, 1)

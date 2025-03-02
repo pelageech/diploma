@@ -86,7 +86,7 @@ func (s *Scheduler) BatchAdd(jobs iter.Seq[*stand.Job]) {
 	}
 }
 
-func (s *Scheduler) BatchRemove(i iter.Seq[*stand.Job]) {
+func (s *Scheduler) BatchRemove(i iter.Seq[stand.JobID]) {
 	//TODO implement me
 	panic("implement me")
 }

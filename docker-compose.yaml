@@ -46,6 +46,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
     command: ["./run-go", "-config", "/app/stand/config.yaml"]
     configs:
       - source: stand_config
@@ -86,7 +88,7 @@ configs:
     content: |
       version: v1
       scheduler:
-        type: ste
+        type: stev1.3
         targets:
           - sleep: 200ms
             interval: 2s

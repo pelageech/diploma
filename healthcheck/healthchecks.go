@@ -17,9 +17,9 @@ type Backend struct {
 	inRow int32
 }
 
-func NewBackend(check func(ctx context.Context) error) Backend {
+func NewBackend(check stand.Runnable) Backend {
 	return Backend{
-		check: check,
+		check: check.Run,
 	}
 }
 

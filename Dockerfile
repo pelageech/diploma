@@ -1,9 +1,10 @@
 # run-go:latest
-FROM golang:1.23-alpine
+FROM golang:1.24-alpine
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
+COPY third-party/* ./
 
 RUN go mod download
 

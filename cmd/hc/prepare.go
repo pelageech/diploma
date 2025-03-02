@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"log/slog"
 	"time"
 
@@ -35,7 +36,7 @@ func prepare(ctx context.Context) (stop func(context.Context) error, err error) 
 		return nil, err
 	}
 
-	stop, err = grpcPrep(ctx, res) // grpcPrep or stdout
+	stop, err = grpcMetricPrep(ctx, res) // grpcMetricPrep or stdout
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,7 @@ func stdout(_ context.Context, res *resource.Resource) (func(context.Context) er
 	return stop, nil
 }
 
-func grpcPrep(ctx context.Context, res *resource.Resource) (func(context.Context) error, error) {
+func grpcMetricPrep(ctx context.Context, res *resource.Resource) (func(context.Context) error, error) {
 	exp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure(), otlpmetricgrpc.WithTimeout(10*time.Second), otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{
 		Enabled:         true,
 		InitialInterval: 500 * time.Millisecond,
@@ -93,6 +94,10 @@ func grpcPrep(ctx context.Context, res *resource.Resource) (func(context.Context
 	provider := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(read))
 	otel.SetMeterProvider(provider)
 	stop = closer(stop, provider.Shutdown)
+
+	if err := runtime.Start(); err != nil {
+		return nil, err
+	}
 
 	return stop, nil
 }

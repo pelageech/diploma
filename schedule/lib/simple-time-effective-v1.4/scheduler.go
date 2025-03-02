@@ -2,26 +2,34 @@ package simple_time_effective
 
 import (
 	"context"
-	"fmt"
+	job2 "github.com/golang-queue/queue/job"
 	"iter"
-	"log/slog"
+	"log"
 	"sync"
 	"time"
 
+	"github.com/golang-queue/queue"
 	"github.com/pelageech/diploma/stand"
 	"go.opentelemetry.io/otel"
 )
 
 type Scheduler struct {
-	jobs map[stand.JobID]*stand.Job
+	mu      sync.RWMutex
+	jobs    map[stand.JobID]*stand.Job
+	timeMap map[time.Duration]map[stand.JobID]struct{}
 }
 
 func NewScheduler(jobs []*stand.Job) *Scheduler {
+	s := &Scheduler{}
 	m := make(map[stand.JobID]*stand.Job, len(jobs))
+	s.timeMap = make(map[time.Duration]map[stand.JobID]struct{}, len(jobs))
+
 	for _, j := range jobs {
-		m[j.ID()] = j
+		_ = s.addThreadUnsafe(j)
+
 	}
-	return &Scheduler{jobs: m}
+	s.jobs = m
+	return s
 }
 
 func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
@@ -41,77 +49,46 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 	tasksWaiting, _ := meter.Int64UpDownCounter("tasks_waiting")
 	//tasksTimeout, _ := meter.Int64Counter("tasks_timeout")
 	taskFullPath, _ := meter.Int64Histogram("task_full_path")
-	jobsCount, _ := meter.Int64UpDownCounter("jobs_count")
 
 	wg := sync.WaitGroup{}
-	wg.Add(len(s.jobs))
-	jobCh := make(chan *stand.Job, 5000000)
-	m := map[stand.JobID]chan struct{}{}
-	for _, job := range s.jobs {
+	q := queue.NewPool(5000, queue.WithWorkerCount(450))
+	q.Start()
 
-		//done := make(chan struct{})
-		m[job.ID()] = make(chan struct{}, 1)
-		//jobCh := make(chan *stand.Job)
-		go func(job *stand.Job) {
-			defer jobsCount.Add(context.Background(), -1)
-			jobsCount.Add(context.Background(), 1)
+	defer q.Release()
+
+	wg.Add(len(s.jobs))
+	for dur, jobs := range s.timeMap {
+		wg.Add(1)
+		go func(dur time.Duration, jobs map[stand.JobID]struct{}) {
 			defer wg.Done()
-			//defer func() {
-			//	close(jobCh)
-			//}()
-			ticker := time.NewTicker(job.Interval())
+			ticker := time.NewTicker(dur)
 			defer ticker.Stop()
 
-			<-ticker.C
-			timer := time.NewTimer(job.Timeout())
-			defer timer.Stop()
-
-			jobCh <- job
-			tasksWaiting.Add(ctx, 1)
-			for {
+			for range ticker.C {
 				select {
 				case <-ctx.Done():
 					return
-				case <-m[job.ID()]:
-					//case <-timer.C:
-					//	tasksTimeout.Add(ctx, 1)
+				default:
 				}
-				//timer.Stop()
-
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					//timer.Reset(job.Timeout())
-					jobCh <- job
+				s.mu.RLock()
+				for jobID := range jobs {
+					job := s.jobs[jobID]
+					tout := job.Timeout()
 					tasksWaiting.Add(ctx, 1)
-				}
-			}
-		}(job)
-	}
-	for range 450 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				t := time.Now()
-				select {
-				case <-ctx.Done():
-					for job := range jobCh {
-						close(m[job.ID()])
-					}
-					return
-				case job := <-jobCh:
-					tasksWaiting.Add(ctx, -1)
-					err := job.Run(ctx)
+					err := q.QueueTask(func(ctx context.Context) error {
+						t := time.Now()
+						defer taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
+						tasksWaiting.Add(ctx, -1)
+						return job.Run(ctx)
+					}, job2.AllowOption{Timeout: &tout})
 					if err != nil {
-						slog.Error("job err", "id", job.ID(), "err", err)
+						log.Println(job.ID(), err)
 					}
-					m[job.ID()] <- struct{}{}
 				}
-				taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
+				s.mu.RUnlock()
 			}
-		}()
+		}(dur, jobs)
+
 	}
 
 	wg.Wait()
@@ -119,9 +96,21 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 }
 
 func (s *Scheduler) Add(job *stand.Job) error {
-	if _, ok := s.jobs[job.ID()]; ok {
-		return fmt.Errorf("%s: %w", job.ID(), stand.ErrJobExists)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addThreadUnsafe(job)
+}
+
+func (s *Scheduler) addThreadUnsafe(job *stand.Job) error {
+	m, ok := s.timeMap[job.Interval()]
+	if !ok {
+		m = make(map[stand.JobID]struct{})
+		s.timeMap[job.Interval()] = m
 	}
+	if _, ok := m[job.ID()]; ok {
+		return stand.ErrJobExists
+	}
+	m[job.ID()] = struct{}{}
 	s.jobs[job.ID()] = job
 	return nil
 }

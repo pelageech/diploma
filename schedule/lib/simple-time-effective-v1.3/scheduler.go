@@ -3,12 +3,14 @@ package simple_time_effective
 import (
 	"context"
 	"fmt"
+	job2 "github.com/golang-queue/queue/job"
 	"iter"
-	"log/slog"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/golang-queue/queue"
 	"github.com/pelageech/diploma/stand"
 	"go.opentelemetry.io/otel"
 )
@@ -35,6 +37,8 @@ func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
 	}
 }
 
+var _x *atomic.Int64 = &atomic.Int64{}
+
 func (s *Scheduler) Schedule(ctx context.Context) error {
 	// tracer := otel.GetTracerProvider().Tracer("ste-scheduler")
 	meter := otel.GetMeterProvider().Meter("scheduler")
@@ -45,103 +49,40 @@ func (s *Scheduler) Schedule(ctx context.Context) error {
 	jobsCount, _ := meter.Int64UpDownCounter("jobs_count")
 
 	wg := sync.WaitGroup{}
+	q := queue.NewPool(595, queue.WithWorkerCount(500))
+	q.Start()
+
+	defer q.Release()
+
 	wg.Add(len(s.jobs))
-	jobChs := make([]chan *stand.Job, 16)
-	for i := range jobChs {
-		jobChs[i] = make(chan *stand.Job, 1000)
-	}
-
-	i := uint32(0)
-	put := func(j *stand.Job) {
-		for {
-			idx := atomic.AddUint32(&i, 1) & 0b1111
-			select {
-			case <-ctx.Done():
-				return
-			case jobChs[idx] <- j:
-				return
-			default:
-			}
-		}
-	}
-
-	k := uint32(0)
-	get := func() *stand.Job {
-		for {
-			idx := atomic.AddUint32(&k, 1) & 0b1111
-			select {
-			case <-ctx.Done():
-				return nil
-			case job := <-jobChs[idx]:
-				return job
-			default:
-			}
-		}
-	}
-
-	//jobCh := make(chan *stand.Job, 5000000)
-	m := map[stand.JobID]chan struct{}{}
 	for _, job := range s.jobs {
-
 		//done := make(chan struct{})
-		m[job.ID()] = make(chan struct{}, 1)
 		//jobCh := make(chan *stand.Job)
 		go func(job *stand.Job) {
+			tout := job.Timeout()
 			defer jobsCount.Add(context.Background(), -1)
 			jobsCount.Add(context.Background(), 1)
 			defer wg.Done()
-			//defer func() {
-			//	close(jobCh)
-			//}()
 			ticker := time.NewTicker(job.Interval())
 			defer ticker.Stop()
 
-			<-ticker.C
-			timer := time.NewTimer(job.Timeout())
-			defer timer.Stop()
-
-			put(job)
-			tasksWaiting.Add(ctx, 1)
-			for {
-				select {
-				case <-ctx.Done():
+			for range ticker.C {
+				if ctx.Err() != nil {
 					return
-				case <-m[job.ID()]:
-					//case <-timer.C:
-					//	tasksTimeout.Add(ctx, 1)
 				}
-				//timer.Stop()
+				tasksWaiting.Add(ctx, 1)
 
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					//timer.Reset(job.Timeout())
-					put(job)
-					tasksWaiting.Add(ctx, 1)
+				err := q.QueueTask(func(ctx context.Context) error {
+					t := time.Now()
+					defer taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
+					tasksWaiting.Add(ctx, -1)
+					return job.Run(ctx)
+				}, job2.AllowOption{Timeout: &tout})
+				if err != nil {
+					log.Println(job.ID(), err)
 				}
 			}
 		}(job)
-	}
-	for range 450 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				t := time.Now()
-				job := get()
-				if job == nil {
-					return
-				}
-				tasksWaiting.Add(ctx, -1)
-				err := job.Run(ctx)
-				if err != nil {
-					slog.Error("job err", "id", job.ID(), "err", err)
-				}
-				m[job.ID()] <- struct{}{}
-				taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
-			}
-		}()
 	}
 
 	wg.Wait()
@@ -167,7 +108,7 @@ func (s *Scheduler) BatchAdd(jobs iter.Seq[*stand.Job]) {
 	}
 }
 
-func (s *Scheduler) BatchRemove(i iter.Seq[*stand.Job]) {
+func (s *Scheduler) BatchRemove(i iter.Seq[stand.JobID]) {
 	//TODO implement me
 	panic("implement me")
 }

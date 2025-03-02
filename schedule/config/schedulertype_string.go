@@ -11,15 +11,21 @@ func _() {
 	_ = x[Clock-0]
 	_ = x[MultiClock-1]
 	_ = x[SimpleTimeEffective-2]
-	_ = x[SimpleWithContext-3]
-	_ = x[InGoroutine-4]
-	_ = x[InGoroutineCancellable-5]
-	_ = x[WorkerPool-6]
+	_ = x[STEv1_1-3]
+	_ = x[STEv1_2-4]
+	_ = x[STEv1_3-5]
+	_ = x[STEv1_4-6]
+	_ = x[STEv1_4_5-7]
+	_ = x[SimpleWithContext-8]
+	_ = x[InGoroutine-9]
+	_ = x[InGoroutineCancellable-10]
+	_ = x[WorkerPool-11]
+	_ = x[__end-12]
 }
 
-const _SchedulerType_name = "ClockMultiClockSimpleTimeEffectiveSimpleWithContextInGoroutineInGoroutineCancellableWorkerPool"
+const _SchedulerType_name = "ClockMultiClockSimpleTimeEffectiveSTEv1_1STEv1_2STEv1_3STEv1_4STEv1_4_5SimpleWithContextInGoroutineInGoroutineCancellableWorkerPool__end"
 
-var _SchedulerType_index = [...]uint8{0, 5, 15, 34, 51, 62, 84, 94}
+var _SchedulerType_index = [...]uint8{0, 5, 15, 34, 41, 48, 55, 62, 71, 88, 99, 121, 131, 136}
 
 func (i SchedulerType) String() string {
 	if i < 0 || i >= SchedulerType(len(_SchedulerType_index)-1) {

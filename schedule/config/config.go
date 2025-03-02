@@ -6,6 +6,11 @@ import (
 	"github.com/pelageech/diploma/schedule/lib/ingoroutine"
 	igc "github.com/pelageech/diploma/schedule/lib/ingoroutine-cancellabe"
 	ste "github.com/pelageech/diploma/schedule/lib/simple-time-effective"
+	ste1_1 "github.com/pelageech/diploma/schedule/lib/simple-time-effective-v1.1"
+	ste1_2 "github.com/pelageech/diploma/schedule/lib/simple-time-effective-v1.2"
+	ste1_3 "github.com/pelageech/diploma/schedule/lib/simple-time-effective-v1.3"
+	ste1_4 "github.com/pelageech/diploma/schedule/lib/simple-time-effective-v1.4"
+	ste1_4_5 "github.com/pelageech/diploma/schedule/lib/simple-time-effective-v1.4.5"
 	swe "github.com/pelageech/diploma/schedule/lib/simple-with-context"
 	workerpool "github.com/pelageech/diploma/schedule/worker-pool"
 	"github.com/pelageech/diploma/stand"
@@ -25,10 +30,17 @@ const (
 	Clock SchedulerType = iota
 	MultiClock
 	SimpleTimeEffective
+	STEv1_1
+	STEv1_2
+	STEv1_3
+	STEv1_4
+	STEv1_4_5
 	SimpleWithContext
 	InGoroutine
 	InGoroutineCancellable
 	WorkerPool
+
+	__end
 )
 
 func (s *SchedulerType) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -51,6 +63,16 @@ func (s *SchedulerType) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		*s = InGoroutineCancellable
 	case "worker-pool":
 		*s = WorkerPool
+	case "stev1.1":
+		*s = STEv1_1
+	case "stev1.2":
+		*s = STEv1_2
+	case "stev1.3":
+		*s = STEv1_3
+	case "stev1.4":
+		*s = STEv1_4
+	case "stev1.4.5":
+		*s = STEv1_4
 	}
 	return nil
 }
@@ -114,6 +136,51 @@ func ToScheduler(t SchedulerType, params ...any) (stand.Scheduler, error) {
 			return nil, errors.New("invalid parameter")
 		}
 		return workerpool.NewScheduler(jobs), nil
+	case STEv1_1:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return ste1_1.NewScheduler(jobs), nil
+	case STEv1_2:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return ste1_2.NewScheduler(jobs), nil
+	case STEv1_3:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return ste1_3.NewScheduler(jobs), nil
+	case STEv1_4:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return ste1_4.NewScheduler(jobs), nil
+	case STEv1_4_5:
+		if len(params) < 1 {
+			return nil, errors.New("must provide one parameter")
+		}
+		jobs, ok := params[0].([]*stand.Job)
+		if !ok {
+			return nil, errors.New("invalid parameter")
+		}
+		return ste1_4_5.NewScheduler(jobs), nil
 	}
 	return nil, errors.New("unknown SchedulerType")
 }

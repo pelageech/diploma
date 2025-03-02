@@ -1,5 +1,4 @@
 vendor
-third-party
 .gitignore
 cmd/nethc
 grafana

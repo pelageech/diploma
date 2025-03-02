@@ -1,14 +1,10 @@
-package swe
+package base
 
 import (
 	"context"
 	"fmt"
-	"iter"
-	"log"
-	"sync"
-	"time"
-
 	"github.com/pelageech/diploma/stand"
+	"iter"
 )
 
 type Scheduler struct {
@@ -33,39 +29,6 @@ func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
 	}
 }
 
-func (s *Scheduler) Schedule(ctx context.Context) error {
-	wg := sync.WaitGroup{}
-	wg.Add(len(s.jobs))
-	for _, job := range s.jobs {
-		go func() {
-			defer wg.Done()
-
-			ticker := time.NewTicker(job.Interval())
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					break
-				default:
-				}
-
-				select {
-				case <-ticker.C:
-					ctx, cancel := context.WithTimeout(ctx, job.Timeout())
-					if err := job.Run(ctx); err != nil {
-						log.Println(err)
-					}
-					cancel()
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	return nil
-}
-
 func (s *Scheduler) Add(job *stand.Job) error {
 	if _, ok := s.jobs[job.ID()]; ok {
 		return fmt.Errorf("%s: %w", job.ID(), stand.ErrJobExists)
@@ -85,7 +48,14 @@ func (s *Scheduler) BatchAdd(jobs iter.Seq[*stand.Job]) {
 	}
 }
 
-func (s *Scheduler) BatchRemove(i iter.Seq[stand.JobID]) {
-	//TODO implement me
-	panic("implement me")
+func (s *Scheduler) BatchRemove(ids iter.Seq[stand.JobID]) {
+	for jobID := range ids {
+		s.Remove(jobID)
+	}
+}
+
+func (s *Scheduler) Schedule(ctx context.Context) error { return nil }
+
+func (s *Scheduler) JobsMap() map[stand.JobID]*stand.Job {
+	return s.jobs
 }

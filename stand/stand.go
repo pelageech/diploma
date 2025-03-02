@@ -3,7 +3,6 @@ package stand
 import (
 	"context"
 	"errors"
-	"fmt"
 	"go.opentelemetry.io/otel"
 	"iter"
 	"sync/atomic"
@@ -11,14 +10,15 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-
-	"github.com/google/uuid"
 )
 
-type JobID fmt.Stringer
+type JobID int
+
+var i JobID
 
 func generateID() JobID {
-	return uuid.New()
+	i++
+	return i
 }
 
 type Runnable interface {
@@ -87,13 +87,13 @@ var (
 )
 
 func (j *Job) Run(ctx context.Context, opts ...JobRunOpt) error {
-	c := &runConfig{}
+	c := runConfig{}
 	for _, opt := range opts {
-		opt(c)
+		opt(&c)
 	}
 
 	t := time.Now()
-	j.tasksWorking.Add(ctx, 1)
+	//j.tasksWorking.Add(ctx, 1)
 
 	var err error
 	if c.cancellable {
@@ -115,7 +115,7 @@ func (j *Job) Run(ctx context.Context, opts ...JobRunOpt) error {
 		err = j.run(ctx)
 	}
 
-	j.tasksWorking.Add(ctx, -1)
+	//j.tasksWorking.Add(ctx, -1)
 	f := time.Since(t).Milliseconds()
 
 	if err != nil {
@@ -127,8 +127,8 @@ func (j *Job) Run(ctx context.Context, opts ...JobRunOpt) error {
 		j.hist.Record(ctx, f, _attributeErr)
 		return err
 	}
-	j.tasksComplete.Add(ctx, 1)
-	j.hist.Record(ctx, f, _attributeOK)
+	//j.tasksComplete.Add(ctx, 1)
+	//j.hist.Record(ctx, f, _attributeOK)
 
 	return nil
 }
@@ -234,7 +234,7 @@ type Scheduler interface {
 type BatchScheduler interface {
 	Scheduler
 	BatchAdd(iter.Seq[*Job])
-	BatchRemove(iter.Seq[*Job])
+	BatchRemove(iter.Seq[JobID])
 }
 
 type PrepareScheduler interface {

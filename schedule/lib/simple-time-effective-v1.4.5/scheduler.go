@@ -1,14 +1,17 @@
-package swe
+package simple_time_effective
 
 import (
 	"context"
 	"fmt"
+	job2 "github.com/golang-queue/queue/job"
 	"iter"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/golang-queue/queue"
 	"github.com/pelageech/diploma/stand"
+	"go.opentelemetry.io/otel"
 )
 
 type Scheduler struct {
@@ -34,32 +37,52 @@ func (s *Scheduler) Jobs() iter.Seq2[stand.JobID, *stand.Job] {
 }
 
 func (s *Scheduler) Schedule(ctx context.Context) error {
+	// tracer := otel.GetTracerProvider().Tracer("ste-scheduler")
+	meter := otel.GetMeterProvider().Meter("scheduler")
+
+	tasksWaiting, _ := meter.Int64UpDownCounter("tasks_waiting")
+	//tasksTimeout, _ := meter.Int64Counter("tasks_timeout")
+	taskFullPath, _ := meter.Int64Histogram("task_full_path")
+	jobsCount, _ := meter.Int64UpDownCounter("jobs_count")
+
 	wg := sync.WaitGroup{}
+	q := queue.NewPool(5000, queue.WithWorkerCount(458))
+	q.Start()
+
+	defer q.Release()
+
 	wg.Add(len(s.jobs))
 	for _, job := range s.jobs {
-		go func() {
+		j := true
+		//done := make(chan struct{})
+		//jobCh := make(chan *stand.Job)
+		go func(job *stand.Job) {
+			tout := job.Timeout()
+			defer jobsCount.Add(context.Background(), -1)
+			jobsCount.Add(context.Background(), 1)
 			defer wg.Done()
-
 			ticker := time.NewTicker(job.Interval())
 			defer ticker.Stop()
 
 			for {
+				<-ticker.C
 				select {
 				case <-ctx.Done():
-					break
+					return
 				default:
 				}
-
-				select {
-				case <-ticker.C:
-					ctx, cancel := context.WithTimeout(ctx, job.Timeout())
-					if err := job.Run(ctx); err != nil {
-						log.Println(err)
-					}
-					cancel()
+				tasksWaiting.Add(ctx, 1)
+				err := q.QueueTask(func(ctx context.Context) error {
+					t := time.Now()
+					defer taskFullPath.Record(ctx, int64(time.Since(t).Milliseconds()))
+					tasksWaiting.Add(ctx, -1)
+					return job.Run(ctx)
+				}, job2.AllowOption{Timeout: &tout, Jitter: &j})
+				if err != nil {
+					log.Println(job.ID(), err)
 				}
 			}
-		}()
+		}(job)
 	}
 
 	wg.Wait()

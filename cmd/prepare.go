@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func closer(fns ...func(context.Context) error) func(context.Context) error {
 	}
 }
 
-func prepare(ctx context.Context) (stop func(context.Context) error, err error) {
+func Prepare(ctx context.Context) (stop func(context.Context) error, err error) {
 	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("runtime-instrumentation-example"),
@@ -49,17 +49,17 @@ func prepare(ctx context.Context) (stop func(context.Context) error, err error) 
 			}
 		}
 	}()
-
-	stopTrace, err := grpcTracePrep(ctx, res)
-	if err != nil {
-		return closer(stop, stopTrace), err
-	}
-	stop = closer(stop, stopTrace)
-
-	err = otelRuntimeMeter()
-	if err != nil {
-		return stop, err
-	}
+	//
+	//stopTrace, err := grpcTracePrep(ctx, res)
+	//if err != nil {
+	//	return closer(stop, stopTrace), err
+	//}
+	//stop = closer(stop, stopTrace)
+	//
+	//err = otelRuntimeMeter()
+	//if err != nil {
+	//	return stop, err
+	//}
 
 	return stop, nil
 }
@@ -87,7 +87,7 @@ func grpcPrep(ctx context.Context, res *resource.Resource) (func(context.Context
 		InitialInterval: 500 * time.Millisecond,
 		MaxInterval:     5 * time.Second,
 		MaxElapsedTime:  10 * time.Second,
-	}), otlpmetricgrpc.WithEndpoint("192.168.0.3:4317"))
+	}), otlpmetricgrpc.WithEndpoint("127.0.0.1:4317"))
 	if err != nil {
 		return nil, err
 	}
